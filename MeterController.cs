@@ -15,9 +15,10 @@ internal static class MeterController
 {
     private const float PanelWidth = 430f;
     private const float PanelHeight = 282f;
-    private const float MinimumUserScale = 0.55f;
-    private const float MaximumUserScale = 1.25f;
-    private const float MinimumAutoFitScale = 0.35f;
+    internal const float MinimumUserScale = 0.8f;
+    internal const float MaximumUserScale = 1.25f;
+    internal const float UserScaleStep = 0.05f;
+    private const float MinimumAutoFitScale = MinimumUserScale;
     private const float SourceNameMaxWidth = 132f;
     private const string UnattributedKey = "\u0000unattributed";
 
@@ -68,7 +69,13 @@ internal static class MeterController
     private static float _nextUiRefresh;
     private static string _characterId = string.Empty;
 
-    internal static void Initialize() => _visible = Plugin.Settings.StartVisible.Value;
+    internal static void Initialize()
+    {
+        _visible = Plugin.Settings.StartVisible.Value;
+        float normalizedScale = NormalizeUserScale(Plugin.Settings.UiScale.Value);
+        if (!Mathf.Approximately(Plugin.Settings.UiScale.Value, normalizedScale))
+            Plugin.Settings.UiScale.Value = normalizedScale;
+    }
 
     internal static void ResetSession()
     {
@@ -78,8 +85,7 @@ internal static class MeterController
 
     internal static void ApplyConfiguredScale()
     {
-        _preferredUiScale = Mathf.Clamp(
-            Plugin.Settings.UiScale.Value, MinimumUserScale, MaximumUserScale);
+        _preferredUiScale = NormalizeUserScale(Plugin.Settings.UiScale.Value);
         if (_panelRect is null)
             return;
         ApplyScaleForScreen();
@@ -416,6 +422,7 @@ internal static class MeterController
         Object.DontDestroyOnLoad(_canvasObject);
         _canvas = _canvasObject.AddComponent<Canvas>();
         _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        _canvas.pixelPerfect = true;
         _canvas.sortingOrder = 32000;
         CanvasScaler scaler = _canvasObject.AddComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -432,10 +439,14 @@ internal static class MeterController
         _panelRect.anchoredPosition = new Vector2(
             Plugin.Settings.PositionX.Value, Plugin.Settings.PositionY.Value);
         _panelRect.sizeDelta = new Vector2(PanelWidth, PanelHeight);
-        _preferredUiScale = Mathf.Clamp(
-            Plugin.Settings.UiScale.Value, MinimumUserScale, MaximumUserScale);
+        _preferredUiScale = NormalizeUserScale(Plugin.Settings.UiScale.Value);
         _background = _panelObject.AddComponent<Image>();
         _background.color = new Color(0.035f, 0.045f, 0.06f, 0.94f);
+        // The game-provided panel sprite has rounded corners. Clip the header,
+        // accent, and resize affordance to that same silhouette so opaque child
+        // graphics cannot square off the panel's edges.
+        Mask panelMask = _panelObject.AddComponent<Mask>();
+        panelMask.showMaskGraphic = true;
         Outline outline = _panelObject.AddComponent<Outline>();
         outline.effectColor = new Color(0.68f, 0.54f, 0.28f, 0.7f);
         outline.effectDistance = new Vector2(1f, -1f);
@@ -888,8 +899,7 @@ internal static class MeterController
             Vector2 delta = mouse - _resizeStartMouse;
             float canvasScale = Mathf.Max(0.01f, _canvas.scaleFactor);
             float scaleDelta = (delta.x - delta.y) / (300f * canvasScale);
-            _preferredUiScale = Mathf.Clamp(
-                _resizeStartScale + scaleDelta, MinimumUserScale, MaximumUserScale);
+            _preferredUiScale = NormalizeUserScale(_resizeStartScale + scaleDelta);
             ApplyScaleForScreen();
             ClampPanelToScreen();
         }
@@ -922,6 +932,12 @@ internal static class MeterController
         _panelRect.localScale = new Vector3(effectiveScale, effectiveScale, 1f);
         _lastScreenWidth = Screen.width;
         _lastScreenHeight = Screen.height;
+    }
+
+    private static float NormalizeUserScale(float scale)
+    {
+        float clamped = Mathf.Clamp(scale, MinimumUserScale, MaximumUserScale);
+        return Mathf.Round(clamped / UserScaleStep) * UserScaleStep;
     }
 
     private static void ClampPanelToScreen()
